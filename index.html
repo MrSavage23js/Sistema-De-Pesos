@@ -1,0 +1,177 @@
+<title>Control de Pesos</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders:wght@600;700;800&family=IBM+Plex+Mono:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css">
+
+<div class="shell">
+
+  <header class="appbar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M7 21h10"/>
+          <path d="M7.2 21 8 12h8l.8 9"/>
+          <path class="flame" d="M12 11.2c1.7-1.5 1.7-3.2 0-4.7-1.7 1.5-1.7 3.2 0 4.7z" fill="currentColor" stroke="none"/>
+        </svg>
+      </div>
+      <div>
+        <div class="brand-title">Control de Pesos</div>
+        <div class="brand-sub">Grupo Aramo · Muestreo de veladoras</div>
+      </div>
+    </div>
+    <div class="sync-pill"><span class="dot pending" id="connDot"></span><span id="connText">Conectando…</span></div>
+  </header>
+
+  <main>
+    <!-- CAPTURE SCREEN -->
+    <section class="screen active" id="screen-capture">
+      <div class="section-title" id="formTitleText">Nueva captura</div>
+      <div class="section-hint">Registra vaso, mezcla y peso muestreado por pieza</div>
+
+      <form id="entryForm">
+        <div class="field">
+          <label for="fecha">Fecha</label>
+          <input type="date" id="fecha" required>
+        </div>
+
+        <div class="field">
+          <label for="veladora">Nombre de veladora</label>
+          <input type="text" id="veladora" list="veladoraList" required placeholder="Ej. ESMERALDA #1">
+          <datalist id="veladoraList"></datalist>
+        </div>
+
+        <div class="field">
+          <label for="vasoPeso">Vaso peso prom. (kg)</label>
+          <input type="number" inputmode="decimal" id="vasoPeso" step="0.001" value="0">
+        </div>
+
+        <div class="group">
+          <div class="group-label">Mezcla 1</div>
+          <div class="field-row">
+            <div class="field">
+              <label for="mezcla1">Mezcla</label>
+              <select id="mezcla1"></select>
+            </div>
+            <div class="field">
+              <label for="cartucho1">Cartucho</label>
+              <select id="cartucho1"></select>
+            </div>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label for="piezas1">Piezas muestreadas</label>
+              <input type="number" inputmode="numeric" id="piezas1" min="1" step="1" value="20" required>
+            </div>
+            <div class="field">
+              <label for="pesoTotal1">Peso total pz (kg)</label>
+              <input type="number" inputmode="decimal" id="pesoTotal1" step="0.001" value="0" required>
+            </div>
+          </div>
+          <div class="readout"><span class="r-label">PESO PROM. (KG)</span><span class="r-value" id="pesoProm1Out">0.000</span></div>
+        </div>
+
+        <div class="group">
+          <div class="group-label">Mezcla 2 (opcional)</div>
+          <div class="field-row">
+            <div class="field">
+              <label for="mezcla2">Mezcla</label>
+              <select id="mezcla2"></select>
+            </div>
+            <div class="field">
+              <label for="cartucho2">Cartucho</label>
+              <select id="cartucho2"></select>
+            </div>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label for="piezas2">Piezas muestreadas</label>
+              <input type="number" inputmode="numeric" id="piezas2" min="1" step="1" value="20">
+            </div>
+            <div class="field">
+              <label for="pesoTotal2">Peso total pz (kg) 2</label>
+              <input type="number" inputmode="decimal" id="pesoTotal2" step="0.001" value="0">
+            </div>
+          </div>
+          <div class="readout"><span class="r-label">PESO PROM. (KG) 2</span><span class="r-value" id="pesoProm2Out">0.000</span></div>
+        </div>
+
+        <div class="field">
+          <label for="observaciones">Observaciones</label>
+          <textarea id="observaciones" placeholder="Ninguna"></textarea>
+        </div>
+
+        <div class="submit-row">
+          <button type="button" class="cancel-btn" id="cancelEdit" hidden>Cancelar</button>
+          <button type="submit" class="primary-btn" id="submitBtn">Guardar captura</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- HISTORY SCREEN -->
+    <section class="screen" id="screen-history">
+      <div class="section-title">Historial</div>
+      <div class="section-hint">Capturas de todo el equipo, sincronizadas en vivo</div>
+
+      <div class="stats-row" id="statsRow" hidden></div>
+
+      <div class="toolbar">
+        <input type="search" id="searchBox" placeholder="Buscar veladora…" aria-label="Buscar veladora">
+        <input type="date" id="filterDate" title="Filtrar por fecha" aria-label="Filtrar por fecha">
+        <button class="icon-btn" id="exportBtn" title="Exportar a Excel" aria-label="Exportar a Excel">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        </button>
+      </div>
+      <div class="count-note" id="countNote"></div>
+
+      <div id="cardList"></div>
+
+      <div class="loading-state" id="loadingState" hidden>
+        <div class="spinner"></div>
+        <div>Cargando capturas…</div>
+      </div>
+
+      <div class="empty" id="emptyState" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M9 10h.01M15 10h.01M9.5 15c.7.7 1.6 1 2.5 1s1.8-.3 2.5-1"/></svg>
+        <div>Sin capturas todavía.<br>Usa "Capturar" para registrar la primera.</div>
+      </div>
+    </section>
+  </main>
+
+  <nav class="tabbar">
+    <button class="tab active" data-screen="capture">
+      <span class="icon-bg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v6M12 22c-4 0-6-2.5-6-6 0-3 2-5 3-8h6c1 3 3 5 3 8 0 3.5-2 6-6 6z"/></svg></span>
+      <span class="tab-label">Capturar</span>
+    </button>
+    <button class="tab" data-screen="history">
+      <span class="icon-bg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg></span>
+      <span class="tab-label">Historial</span>
+    </button>
+  </nav>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<div class="modal-overlay" id="confirmModal" hidden>
+  <div class="modal">
+    <p id="confirmText"></p>
+    <div class="modal-actions">
+      <button type="button" id="confirmCancel">Cancelar</button>
+      <button type="button" id="confirmOk" class="danger">Eliminar</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="nameModal" hidden>
+  <div class="modal">
+    <p>¿Cómo te llamas? Se guarda solo en este dispositivo para identificar tus capturas.</p>
+    <input type="text" id="nameInput" placeholder="Tu nombre" class="name-input">
+    <div class="modal-actions">
+      <button type="button" id="nameOk" class="primary">Continuar</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/firebase-config.js"></script>
+<script src="js/app.js"></script>

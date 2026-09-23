@@ -1,0 +1,17 @@
+rules_version = '2';
+
+// Reglas para el proyecto de Firebase de "Control de Pesos" (Grupo Aramo).
+// Pégalas en: Firebase Console > Firestore Database > Reglas.
+//
+// Exigen una sesión anónima de Firebase (la app la crea sola al cargar) y
+// limitan la lectura/escritura a la colección "capturas". No hay contraseñas
+// de usuario: cualquiera con el link de la app puede iniciar sesión anónima
+// y capturar/editar/borrar registros. Para un uso interno de equipo esto es
+// suficiente fricción; no lo uses para datos sensibles.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /capturas/{docId} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}
