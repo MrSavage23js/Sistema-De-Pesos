@@ -109,7 +109,7 @@ function computePromedios() {
   const mezcla2 = document.getElementById('mezcla2').value;
   const cartucho2 = document.getElementById('cartucho2').value;
 
-  const pesoProm1 = piezas1 > 0 ? pesoTotal1 / piezas1 : 0;
+  const pesoProm1 = piezas1 > 0 ? (pesoTotal1 / piezas1) - vaso : 0;
   let pesoProm2 = 0;
   if (!(mezcla2 === "NINGUNA" && cartucho2 === "NINGUNA")) {
     pesoProm2 = piezas2 > 0 ? (pesoTotal2 / piezas2) - pesoProm1 - vaso : 0;
@@ -529,6 +529,7 @@ async function setupFirebase() {
   if (!myId) {
     myId = (await promptName()) || 'Sin nombre';
     localStorage.setItem('aramoCapturerName', myId);
+    toast(`¡Bienvenido, ${myId}!`);
   }
   // No hay directorio de usuarios fuera de claude.ai: el "id" guardado ya es el nombre.
   userCap = {
