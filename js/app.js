@@ -1,14 +1,30 @@
 const MEZCLAS = ["NINGUNA", "PAMECH (M. CHINA)", "PAMECHAE (M. CHINA ACIDO ESTEARICO)", "PAMESU (M. SURESTE)", "PAMEAR (M. AROMATIUM)", "PAMEAG (M. ACIDO GRASO)"];
 const CARTUCHOS = ["NINGUNA", "MOLDEADO", "PRENSADO", "LLENADO", "BATIDO", "PRUEBA", "PENDIENTE"];
 
+// Escape any value before it goes into innerHTML: records come from a shared
+// database, so a captured name or comment must never be able to run as markup.
+function esc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// Today's date as YYYY-MM-DD in the device's local time zone. toISOString()
+// and valueAsDate use UTC, which in Mexico rolls over to "tomorrow" at 18:00.
+function todayLocal() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function fillSelect(sel, options, def) {
-  sel.innerHTML = options.map(o => `<option value="${o}"${o===def?' selected':''}>${o}</option>`).join('');
+  // Keep a stored value that is no longer in the list, so editing an old
+  // record doesn't silently overwrite it with the first option.
+  const opts = def && !options.includes(def) ? [...options, def] : options;
+  sel.innerHTML = opts.map(o => `<option value="${esc(o)}"${o===def?' selected':''}>${esc(o)}</option>`).join('');
 }
 fillSelect(document.getElementById('mezcla1'), MEZCLAS, "PAMECH (M. CHINA)");
 fillSelect(document.getElementById('cartucho1'), CARTUCHOS, "MOLDEADO");
 fillSelect(document.getElementById('mezcla2'), MEZCLAS, "NINGUNA");
 fillSelect(document.getElementById('cartucho2'), CARTUCHOS, "NINGUNA");
-document.getElementById('fecha').valueAsDate = new Date();
+document.getElementById('fecha').value = todayLocal();
 
 // Auto-uppercase free-text fields as the user types
 ['veladora', 'observaciones'].forEach(id => {
@@ -100,20 +116,48 @@ function pulseReadout(el, text) {
   el.classList.add('pulse');
 }
 
-function computePromedios() {
-  const piezas1 = num('piezas1');
-  const piezas2 = num('piezas2');
-  const vaso = num('vasoPeso');
-  const pesoTotal1 = num('pesoTotal1');
-  const pesoTotal2 = num('pesoTotal2');
-  const mezcla2 = document.getElementById('mezcla2').value;
-  const cartucho2 = document.getElementById('cartucho2').value;
+function hasMezcla2(d) {
+  return !((d.mezcla2 || 'NINGUNA') === 'NINGUNA' && (d.cartucho2 || 'NINGUNA') === 'NINGUNA');
+}
 
-  const pesoProm1 = piezas1 > 0 ? (pesoTotal1 / piezas1) - vaso : 0;
-  let pesoProm2 = 0;
-  if (!(mezcla2 === "NINGUNA" && cartucho2 === "NINGUNA")) {
-    pesoProm2 = piezas2 > 0 ? (pesoTotal2 / piezas2) - pesoProm1 - vaso : 0;
-  }
+// Whether the vaso weight is subtracted from mezcla 1. The capturista picks it
+// with a checkbox; records saved before that option existed default to
+// "yes" with one mezcla and "no" with two (la mezcla 1 se pesa sola).
+function restaVaso1(d) {
+  return typeof d.restarVaso1 === 'boolean' ? d.restarVaso1 : !hasMezcla2(d);
+}
+
+/**
+ * Average weights for one record.
+ * - Mezcla 1: prom1 = total1 / piezas1, menos el vaso solo si está marcado.
+ * - Mezcla 2 (veladora terminada): prom2 = total2 / piezas2 − prom1 − vaso.
+ * Used for the form and for displaying/exporting stored records, so older
+ * records saved with the previous formula show corrected values too.
+ */
+function calcPromedios(d) {
+  const vaso = Number(d.vasoPeso) || 0;
+  const piezas1 = Number(d.piezas1 ?? d.piezas) || 0;
+  const piezas2 = Number(d.piezas2 ?? d.piezas) || 0;
+  const pesoTotal1 = Number(d.pesoTotal1) || 0;
+  const pesoTotal2 = Number(d.pesoTotal2) || 0;
+
+  const pesoProm1 = piezas1 > 0 ? (pesoTotal1 / piezas1) - (restaVaso1(d) ? vaso : 0) : 0;
+  if (!hasMezcla2(d)) return { pesoProm1, pesoProm2: 0 };
+  const pesoProm2 = piezas2 > 0 ? (pesoTotal2 / piezas2) - pesoProm1 - vaso : 0;
+  return { pesoProm1, pesoProm2 };
+}
+
+function computePromedios() {
+  const { pesoProm1, pesoProm2 } = calcPromedios({
+    vasoPeso: num('vasoPeso'),
+    piezas1: num('piezas1'),
+    pesoTotal1: num('pesoTotal1'),
+    mezcla2: document.getElementById('mezcla2').value,
+    cartucho2: document.getElementById('cartucho2').value,
+    piezas2: num('piezas2'),
+    pesoTotal2: num('pesoTotal2'),
+    restarVaso1: document.getElementById('restarVaso1').checked,
+  });
 
   const out1 = document.getElementById('pesoProm1Out');
   const out2 = document.getElementById('pesoProm2Out');
@@ -124,7 +168,20 @@ function computePromedios() {
 
   return { pesoProm1, pesoProm2 };
 }
-['piezas1','piezas2','vasoPeso','pesoTotal1','pesoTotal2','mezcla2','cartucho2'].forEach(id => {
+// Until the capturista touches the checkbox, follow the usual case: subtract
+// the vaso with one mezcla, don't with two.
+let restarVasoTouched = false;
+function syncRestarVaso() {
+  if (restarVasoTouched) return;
+  document.getElementById('restarVaso1').checked = !hasMezcla2({
+    mezcla2: document.getElementById('mezcla2').value,
+    cartucho2: document.getElementById('cartucho2').value,
+  });
+}
+document.getElementById('restarVaso1').addEventListener('change', () => { restarVasoTouched = true; });
+['mezcla2', 'cartucho2'].forEach(id => document.getElementById(id).addEventListener('change', syncRestarVaso));
+
+['piezas1','piezas2','vasoPeso','pesoTotal1','pesoTotal2','mezcla2','cartucho2','restarVaso1'].forEach(id => {
   document.getElementById(id).addEventListener('input', computePromedios);
   document.getElementById(id).addEventListener('change', computePromedios);
 });
@@ -132,7 +189,7 @@ computePromedios();
 
 function resetForm() {
   document.getElementById('entryForm').reset();
-  document.getElementById('fecha').valueAsDate = new Date();
+  document.getElementById('fecha').value = todayLocal();
   fillSelect(document.getElementById('mezcla1'), MEZCLAS, "PAMECH (M. CHINA)");
   fillSelect(document.getElementById('cartucho1'), CARTUCHOS, "MOLDEADO");
   fillSelect(document.getElementById('mezcla2'), MEZCLAS, "NINGUNA");
@@ -142,6 +199,8 @@ function resetForm() {
   document.getElementById('vasoPeso').value = 0;
   document.getElementById('pesoTotal1').value = 0;
   document.getElementById('pesoTotal2').value = 0;
+  restarVasoTouched = false;
+  syncRestarVaso();
   editingId = null;
   document.getElementById('formTitleText').textContent = 'Nueva captura';
   document.getElementById('cancelEdit').hidden = true;
@@ -154,6 +213,8 @@ document.getElementById('entryForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   if (!db) { toast('Sin conexión al almacenamiento compartido.', 'error'); return; }
   const { pesoProm1, pesoProm2 } = computePromedios();
+  const problem = validateCapture(pesoProm1, pesoProm2);
+  if (problem) { toast(problem, 'error'); return; }
   const data = {
     fecha: document.getElementById('fecha').value,
     veladora: document.getElementById('veladora').value.trim().toUpperCase(),
@@ -168,6 +229,7 @@ document.getElementById('entryForm').addEventListener('submit', async (e) => {
     piezas2: num('piezas2'),
     pesoTotal2: num('pesoTotal2'),
     pesoProm2,
+    restarVaso1: document.getElementById('restarVaso1').checked,
     observaciones: document.getElementById('observaciones').value.trim() || 'Ninguna',
     updatedAt: new Date().toISOString(),
   };
@@ -192,6 +254,23 @@ document.getElementById('entryForm').addEventListener('submit', async (e) => {
   }
 });
 
+function validateCapture(pesoProm1, pesoProm2) {
+  const isWhole = (n) => Number.isInteger(n) && n >= 1;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(document.getElementById('fecha').value)) return 'Indica la fecha.';
+  if (!document.getElementById('veladora').value.trim()) return 'Indica el nombre de la veladora.';
+  if (num('vasoPeso') < 0) return 'El peso del vaso no puede ser negativo.';
+  if (!isWhole(num('piezas1'))) return 'Mezcla 1: las piezas deben ser un número entero mayor a 0.';
+  if (num('pesoTotal1') <= 0) return 'Mezcla 1: captura el peso total.';
+  if (pesoProm1 < 0) return 'Mezcla 1: el peso promedio sale negativo. Revisa el peso total y el vaso.';
+  const mezcla2 = { mezcla2: document.getElementById('mezcla2').value, cartucho2: document.getElementById('cartucho2').value };
+  if (hasMezcla2(mezcla2)) {
+    if (!isWhole(num('piezas2'))) return 'Mezcla 2: las piezas deben ser un número entero mayor a 0.';
+    if (num('pesoTotal2') <= 0) return 'Mezcla 2: captura el peso total.';
+    if (pesoProm2 < 0) return 'Mezcla 2: el peso promedio sale negativo. Revisa los pesos totales y el vaso.';
+  }
+  return null;
+}
+
 function startEdit(entry) {
   editingId = entry.id;
   document.getElementById('fecha').value = entry.fecha || '';
@@ -206,6 +285,8 @@ function startEdit(entry) {
   document.getElementById('piezas2').value = entry.piezas2 ?? entry.piezas ?? 20;
   document.getElementById('pesoTotal2').value = entry.pesoTotal2 ?? 0;
   document.getElementById('observaciones').value = entry.observaciones === 'Ninguna' ? '' : (entry.observaciones || '');
+  document.getElementById('restarVaso1').checked = restaVaso1(entry);
+  restarVasoTouched = true; // keep the record's choice while editing
   computePromedios();
   document.getElementById('formTitleText').textContent = 'Editar captura';
   document.getElementById('cancelEdit').hidden = false;
@@ -283,17 +364,18 @@ async function exportExcel() {
     { key: 'pesoTotal2', width: 14 },
     { key: 'pesoProm2', width: 14 },
     { key: 'observaciones', width: 30 },
+    { key: 'restaVaso1', width: 14 },
   ];
 
   // Row 1: title. Row 2: export summary.
-  ws.mergeCells('A1:O1');
+  ws.mergeCells('A1:P1');
   ws.getCell('A1').value = 'CONTROL DE PESOS — GRUPO ARAMO';
   ws.getCell('A1').font = { bold: true, size: 14, color: { argb: HEADER_FG } };
   ws.getCell('A1').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: HEADER_BG } };
   ws.getCell('A1').alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
   ws.getRow(1).height = 26;
 
-  ws.mergeCells('A2:O2');
+  ws.mergeCells('A2:P2');
   ws.getCell('A2').value = `Exportado ${new Date().toLocaleString('es-MX')} · ${list.length} captura${list.length === 1 ? '' : 's'}`;
   ws.getCell('A2').font = { italic: true, size: 9.5, color: { argb: 'FFB9884F' } };
   ws.getCell('A2').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: HEADER_BG } };
@@ -307,6 +389,7 @@ async function exportExcel() {
   ws.mergeCells('E3:I3'); ws.getCell('E3').value = 'MEZCLA 1';
   ws.mergeCells('J3:N3'); ws.getCell('J3').value = 'MEZCLA 2';
   ws.mergeCells('O3:O4'); ws.getCell('O3').value = 'OBSERVACIONES';
+  ws.mergeCells('P3:P4'); ws.getCell('P3').value = 'VASO RESTADO A MEZCLA 1';
 
   const subHeaders = ['MEZCLA', 'CARTUCHO', 'PIEZAS MUESTREADAS', 'PESO TOTAL PZ (KG)', 'PESO PROM. (KG)'];
   ['E4', 'F4', 'G4', 'H4', 'I4'].forEach((c, i) => { ws.getCell(c).value = subHeaders[i]; });
@@ -319,6 +402,7 @@ async function exportExcel() {
   ws.getRow(4).height = 30;
 
   list.forEach((e, idx) => {
+    const { pesoProm1, pesoProm2 } = calcPromedios(e);
     const row = ws.addRow({
       fecha: e.fecha || '',
       veladora: e.veladora || '',
@@ -328,21 +412,22 @@ async function exportExcel() {
       cartucho1: e.cartucho1 || '',
       piezas1: e.piezas1 ?? e.piezas ?? '',
       pesoTotal1: e.pesoTotal1 || 0,
-      pesoProm1: e.pesoProm1 || 0,
+      pesoProm1,
       mezcla2: e.mezcla2 || '',
       cartucho2: e.cartucho2 || '',
       piezas2: e.piezas2 ?? e.piezas ?? '',
       pesoTotal2: e.pesoTotal2 || 0,
-      pesoProm2: e.pesoProm2 || 0,
+      pesoProm2,
       observaciones: e.observaciones || '',
+      restaVaso1: restaVaso1(e) ? 'SÍ' : 'NO',
     });
     const r = row.number;
     ['D', 'H', 'M'].forEach(col => { ws.getCell(`${col}${r}`).numFmt = '0.000'; });
     ['G', 'L'].forEach(col => { ws.getCell(`${col}${r}`).numFmt = '0'; });
     ws.getCell(`I${r}`).numFmt = '0.000';
     ws.getCell(`N${r}`).numFmt = '0.000';
-    ws.getCell(`I${r}`).font = { color: { argb: (e.pesoProm1 || 0) < 0 ? WARN : INK }, bold: (e.pesoProm1 || 0) < 0 };
-    ws.getCell(`N${r}`).font = { color: { argb: (e.pesoProm2 || 0) < 0 ? WARN : INK }, bold: (e.pesoProm2 || 0) < 0 };
+    ws.getCell(`I${r}`).font = { color: { argb: pesoProm1 < 0 ? WARN : INK }, bold: pesoProm1 < 0 };
+    ws.getCell(`N${r}`).font = { color: { argb: pesoProm2 < 0 ? WARN : INK }, bold: pesoProm2 < 0 };
 
     row.eachCell({ includeEmpty: true }, (cell) => {
       cell.alignment = { vertical: 'middle' };
@@ -354,10 +439,10 @@ async function exportExcel() {
     ws.getCell(`O${r}`).alignment = { vertical: 'middle', wrapText: true };
   });
 
-  ws.autoFilter = { from: 'A4', to: `O${list.length + 4}` };
+  ws.autoFilter = { from: 'A4', to: `P${list.length + 4}` };
 
   const buffer = await wb.xlsx.writeBuffer();
-  const filename = `control-pesos-${new Date().toISOString().slice(0, 10)}.xlsx`;
+  const filename = `control-pesos-${todayLocal()}.xlsx`;
   const mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
   if (downloads) {
     try { await downloads.save({ filename, data: buffer }); return; }
@@ -370,6 +455,7 @@ async function exportExcel() {
   const blob = new Blob([buffer], { type: mime });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = filename; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
 }
 document.getElementById('exportBtn').addEventListener('click', exportExcel);
 
@@ -398,11 +484,11 @@ async function resolveNames(ids) {
 function renderStats() {
   const row = document.getElementById('statsRow');
   if (!entries.length) { row.hidden = true; return; }
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = todayLocal();
   const todayEntries = entries.filter(e => e.fecha === todayStr);
   const veladorasHoy = new Set(todayEntries.map(e => e.veladora)).size;
   const avgHoy = todayEntries.length
-    ? todayEntries.reduce((s, e) => s + (e.pesoProm1 || 0), 0) / todayEntries.length
+    ? todayEntries.reduce((s, e) => s + calcPromedios(e).pesoProm1, 0) / todayEntries.length
     : 0;
   row.hidden = false;
   row.innerHTML = `
@@ -412,7 +498,9 @@ function renderStats() {
   `;
 }
 
+let renderSeq = 0;
 async function render() {
+  const seq = ++renderSeq;
   renderStats();
 
   const list = filteredEntries();
@@ -436,33 +524,37 @@ async function render() {
   empty.hidden = true;
 
   await resolveNames(list.map(e => e.capturadoPorId));
+  if (seq !== renderSeq) return; // a newer render started while names were loading
 
-  cardList.innerHTML = list.map((e, idx) => `
+  cardList.innerHTML = list.map((e, idx) => {
+    const { pesoProm1, pesoProm2 } = calcPromedios(e);
+    return `
     <div class="entry-card" style="--i:${Math.min(idx, 14)}">
       <div class="card-top">
         <div>
-          <div class="card-date">${e.fecha || ''}</div>
-          <div class="card-name">${e.veladora || ''}</div>
+          <div class="card-date">${esc(e.fecha)}</div>
+          <div class="card-name">${esc(e.veladora)}</div>
         </div>
         <div class="card-actions">
-          <button class="edit" data-id="${e.id}" title="Editar" aria-label="Editar captura"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
-          <button class="del" data-id="${e.id}" title="Eliminar" aria-label="Eliminar captura"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button>
+          <button class="edit" data-id="${esc(e.id)}" title="Editar" aria-label="Editar captura"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+          <button class="del" data-id="${esc(e.id)}" title="Eliminar" aria-label="Eliminar captura"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button>
         </div>
       </div>
       <div class="readouts-row">
-        <div class="readout"><span class="r-label">PROM. 1</span><span class="r-value">${fmt(e.pesoProm1)}</span></div>
-        <div class="readout"><span class="r-label">PROM. 2</span><span class="r-value ${e.pesoProm2 < 0 ? 'neg' : ''}">${fmt(e.pesoProm2)}</span></div>
+        <div class="readout"><span class="r-label">PROM. 1</span><span class="r-value ${pesoProm1 < 0 ? 'neg' : ''}">${fmt(pesoProm1)}</span></div>
+        <div class="readout"><span class="r-label">PROM. 2</span><span class="r-value ${pesoProm2 < 0 ? 'neg' : ''}">${fmt(pesoProm2)}</span></div>
       </div>
       <div class="card-details">
-        <div class="d-item"><span>Vaso (kg)</span>${fmt(e.vasoPeso)}</div>
-        <div class="d-item"><span>Piezas mezcla 1 / 2</span>${e.piezas1 ?? e.piezas ?? '—'} / ${e.piezas2 ?? e.piezas ?? '—'}</div>
-        <div class="d-item"><span>Mezcla 1</span>${e.mezcla1 || ''} · ${e.cartucho1 || ''}</div>
-        <div class="d-item"><span>Mezcla 2</span>${e.mezcla2 || ''} · ${e.cartucho2 || ''}</div>
-        <div class="d-item full"><span>Observaciones</span><span class="card-obs">${e.observaciones || ''}</span></div>
-        <div class="d-item full"><span>Capturado por</span>${e.capturadoPorId ? (profileCache[e.capturadoPorId] || '—') : '—'}</div>
+        <div class="d-item"><span>Vaso (kg)</span>${fmt(Number(e.vasoPeso))} · ${restaVaso1(e) ? 'restado a mezcla 1' : 'no restado a mezcla 1'}</div>
+        <div class="d-item"><span>Piezas mezcla 1 / 2</span>${esc(e.piezas1 ?? e.piezas ?? '—')} / ${esc(e.piezas2 ?? e.piezas ?? '—')}</div>
+        <div class="d-item"><span>Mezcla 1</span>${esc(e.mezcla1)} · ${esc(e.cartucho1)}</div>
+        <div class="d-item"><span>Mezcla 2</span>${esc(e.mezcla2)} · ${esc(e.cartucho2)}</div>
+        <div class="d-item full"><span>Observaciones</span><span class="card-obs">${esc(e.observaciones)}</span></div>
+        <div class="d-item full"><span>Capturado por</span>${esc(e.capturadoPorId ? (profileCache[e.capturadoPorId] || '—') : '—')}</div>
       </div>
     </div>
-  `).join('');
+  `;
+  }).join('');
 
   cardList.querySelectorAll('.edit').forEach(b => b.addEventListener('click', () => {
     const entry = entries.find(x => x.id === b.dataset.id);
@@ -472,7 +564,7 @@ async function render() {
 
   const dl = document.getElementById('veladoraList');
   const names = [...new Set(entries.map(e => e.veladora).filter(Boolean))].sort();
-  dl.innerHTML = names.map(n => `<option value="${n}">`).join('');
+  dl.innerHTML = names.map(n => `<option value="${esc(n)}">`).join('');
 }
 
 function loadScript(src) {
@@ -523,7 +615,7 @@ async function setupFirebase() {
   firebase.initializeApp(cfg);
   await firebase.auth().signInAnonymously();
   db = firebase.firestore();
-  downloads = null; // exportCSV() already falls back to a direct browser download
+  downloads = null; // exportExcel() already falls back to a direct browser download
 
   myId = localStorage.getItem('aramoCapturerName') || '';
   if (!myId) {

@@ -277,6 +277,25 @@ textarea { resize: vertical; min-height: 42px; font-size: 14px; }
   letter-spacing: 0.05em; text-transform: uppercase; margin-bottom: 10px;
 }
 
+.check-row {
+  display: flex; align-items: center; gap: 10px;
+  margin: 0 0 12px; cursor: pointer;
+  font-size: 13px; font-weight: 500; color: var(--ink); letter-spacing: 0;
+}
+.check-row input {
+  width: 20px; height: 20px; padding: 0; flex: none;
+  border-radius: 6px; cursor: pointer;
+  display: grid; place-content: center;
+}
+.check-row input::after {
+  content: ""; width: 10px; height: 5px;
+  border-left: 2px solid var(--accent-ink); border-bottom: 2px solid var(--accent-ink);
+  transform: translateY(-1px) rotate(-45deg) scale(0);
+  transition: transform .15s var(--ease-out);
+}
+.check-row input:checked { background: var(--accent); border-color: var(--accent); }
+.check-row input:checked::after { transform: translateY(-1px) rotate(-45deg) scale(1); }
+
 /* LED-style readout */
 .readout {
   background: var(--readout-bg);

@@ -8,10 +8,59 @@ rules_version = '2';
 // de usuario: cualquiera con el link de la app puede iniciar sesión anónima
 // y capturar/editar/borrar registros. Para un uso interno de equipo esto es
 // suficiente fricción; no lo uses para datos sensibles.
+//
+// Además validan la forma de cada registro (campos permitidos, tipos y
+// tamaños), para que nadie pueda meter datos basura o campos extra escribiendo
+// directo a la base sin pasar por la app.
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    function shortString(v, max) {
+      return v is string && v.size() <= max;
+    }
+
+    function nonNegative(v) {
+      return v is number && v >= 0;
+    }
+
+    function validCaptura(d) {
+      return d.keys().hasOnly([
+               'fecha', 'veladora', 'vasoPeso',
+               'mezcla1', 'cartucho1', 'piezas1', 'pesoTotal1', 'pesoProm1',
+               'mezcla2', 'cartucho2', 'piezas2', 'pesoTotal2', 'pesoProm2',
+               'observaciones', 'createdAt', 'updatedAt', 'capturadoPorId', 'restarVaso1',
+               'piezas' // campo de registros antiguos
+             ])
+          && d.keys().hasAll(['fecha', 'veladora', 'pesoTotal1', 'piezas1', 'updatedAt'])
+          && d.fecha is string && d.fecha.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+          && shortString(d.veladora, 100) && d.veladora.size() > 0
+          && nonNegative(d.get('vasoPeso', 0))
+          && shortString(d.get('mezcla1', ''), 100)
+          && shortString(d.get('cartucho1', ''), 100)
+          && nonNegative(d.piezas1)
+          && nonNegative(d.pesoTotal1)
+          && d.get('pesoProm1', 0) is number
+          && shortString(d.get('mezcla2', ''), 100)
+          && shortString(d.get('cartucho2', ''), 100)
+          && nonNegative(d.get('piezas2', 0))
+          && nonNegative(d.get('pesoTotal2', 0))
+          && d.get('pesoProm2', 0) is number
+          && d.get('restarVaso1', true) is bool
+          && shortString(d.get('observaciones', ''), 2000)
+          && shortString(d.updatedAt, 40)
+          && shortString(d.get('createdAt', ''), 40)
+          && (d.get('capturadoPorId', null) == null || shortString(d.get('capturadoPorId', ''), 100));
+    }
+
     match /capturas/{docId} {
-      allow read, write: if request.auth != null;
+      allow read: if request.auth != null;
+      allow create: if request.auth != null && validCaptura(request.resource.data);
+      // Al editar no se puede cambiar quién capturó ni cuándo se creó.
+      allow update: if request.auth != null
+                    && validCaptura(request.resource.data)
+                    && request.resource.data.get('createdAt', null) == resource.data.get('createdAt', null)
+                    && request.resource.data.get('capturadoPorId', null) == resource.data.get('capturadoPorId', null);
+      allow delete: if request.auth != null;
     }
   }
 }
