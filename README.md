@@ -78,3 +78,25 @@ cada registro (`restarVaso1`) y aparece en el historial y en el Excel.
 El historial y la exportación recalculan los promedios a partir de los pesos
 capturados. Los registros guardados antes de que existiera la casilla usan el
 caso habitual: restan el vaso con una mezcla y no lo restan con dos.
+
+## Fotografía de evidencia
+
+Cada captura nueva debe llevar una foto (por ejemplo, la báscula mostrando el
+peso). En el celular, el botón **"Tomar o elegir foto"** abre la cámara o la
+galería; en la computadora, el selector de archivos.
+
+- La foto se comprime en el navegador (JPEG, máx. 1280 px por lado, ~150–300 KB)
+  y se guarda en la colección **`fotos`**. La captura solo guarda su id en
+  `fotoId`, así el historial no descarga todas las fotos al cargar.
+- No se usa Firebase Storage porque ya no forma parte del plan gratuito Spark;
+  el plan gratuito de Firestore da 1 GiB, suficiente para varios miles de fotos.
+- En el historial, las capturas con foto muestran un ícono de cámara para verla.
+  Al editar se puede cambiar o quitar la foto, y al borrar una captura se borra
+  también su foto.
+- La foto es obligatoria para guardar. Solo las capturas hechas antes de esta
+  función se pueden editar sin foto.
+- El Excel incluye la columna **FOTO DE EVIDENCIA** (SÍ / NO).
+
+**Importante:** después de actualizar el código, vuelve a pegar el contenido de
+`firestore.rules` en **Firestore Database > Reglas** y publícalo; sin eso,
+Firebase rechazará las capturas con foto.

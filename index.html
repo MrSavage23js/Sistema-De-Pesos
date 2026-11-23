@@ -111,6 +111,23 @@
           <textarea id="observaciones" placeholder="Ninguna"></textarea>
         </div>
 
+        <div class="group">
+          <div class="group-label">Fotografía de evidencia (obligatoria)</div>
+          <input type="file" id="fotoInput" accept="image/*" class="visually-hidden" tabindex="-1">
+          <div class="photo-preview" id="photoPreviewBox" hidden>
+            <img id="photoPreview" alt="Vista previa de la fotografía de evidencia">
+            <div class="photo-loading" id="photoLoading" hidden><div class="spinner"></div></div>
+          </div>
+          <div class="photo-actions">
+            <button type="button" class="photo-btn" id="photoPick">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+              <span id="photoPickText">Tomar o elegir foto</span>
+            </button>
+            <button type="button" class="cancel-btn photo-remove" id="photoRemove" hidden>Quitar</button>
+          </div>
+          <div class="photo-hint">Foto de la báscula mostrando el peso registrado.</div>
+        </div>
+
         <div class="submit-row">
           <button type="button" class="cancel-btn" id="cancelEdit" hidden>Cancelar</button>
           <button type="submit" class="primary-btn" id="submitBtn">Guardar captura</button>
@@ -168,6 +185,19 @@
     <div class="modal-actions">
       <button type="button" id="confirmCancel">Cancelar</button>
       <button type="button" id="confirmOk" class="danger">Eliminar</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="photoModal" hidden>
+  <div class="modal photo-modal">
+    <div class="photo-modal-title" id="photoModalTitle">Fotografía de evidencia</div>
+    <div class="photo-modal-body">
+      <img id="photoModalImg" alt="Fotografía de evidencia" hidden>
+      <div class="photo-modal-status" id="photoModalStatus"></div>
+    </div>
+    <div class="modal-actions">
+      <button type="button" id="photoModalClose">Cerrar</button>
     </div>
   </div>
 </div>

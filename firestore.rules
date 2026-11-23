@@ -28,7 +28,7 @@ service cloud.firestore {
                'fecha', 'veladora', 'vasoPeso',
                'mezcla1', 'cartucho1', 'piezas1', 'pesoTotal1', 'pesoProm1',
                'mezcla2', 'cartucho2', 'piezas2', 'pesoTotal2', 'pesoProm2',
-               'observaciones', 'createdAt', 'updatedAt', 'capturadoPorId', 'restarVaso1',
+               'observaciones', 'createdAt', 'updatedAt', 'capturadoPorId', 'restarVaso1', 'fotoId',
                'piezas' // campo de registros antiguos
              ])
           && d.keys().hasAll(['fecha', 'veladora', 'pesoTotal1', 'piezas1', 'updatedAt'])
@@ -47,6 +47,7 @@ service cloud.firestore {
           && d.get('pesoProm2', 0) is number
           && d.get('restarVaso1', true) is bool
           && shortString(d.get('observaciones', ''), 2000)
+          && shortString(d.get('fotoId', ''), 100)
           && shortString(d.updatedAt, 40)
           && shortString(d.get('createdAt', ''), 40)
           && (d.get('capturadoPorId', null) == null || shortString(d.get('capturadoPorId', ''), 100));
@@ -60,6 +61,20 @@ service cloud.firestore {
                     && validCaptura(request.resource.data)
                     && request.resource.data.get('createdAt', null) == resource.data.get('createdAt', null)
                     && request.resource.data.get('capturadoPorId', null) == resource.data.get('capturadoPorId', null);
+      allow delete: if request.auth != null;
+    }
+
+    // Fotografías de evidencia: JPEG comprimido en el navegador, guardado como
+    // data URL. Cada captura apunta a la suya con "fotoId". No se editan: al
+    // cambiar la foto se crea una nueva y se borra la anterior.
+    match /fotos/{fotoId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+                    && request.resource.data.keys().hasOnly(['foto', 'createdAt'])
+                    && request.resource.data.foto is string
+                    && request.resource.data.foto.size() <= 1000000
+                    && shortString(request.resource.data.get('createdAt', ''), 40);
+      allow update: if false;
       allow delete: if request.auth != null;
     }
   }

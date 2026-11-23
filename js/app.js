@@ -187,7 +187,135 @@ document.getElementById('restarVaso1').addEventListener('change', () => { restar
 });
 computePromedios();
 
+// --- Fotografía de evidencia ---
+// The photo is compressed in the browser and stored as a JPEG data URL in its
+// own "fotos" document (Firestore docs max out at 1 MiB, and Firebase Storage
+// is not on the free Spark plan). Captures only keep its id in `fotoId`, so the
+// live history doesn't download every photo.
+const FOTO_MAX_SIDE = 1280;
+const FOTO_MAX_CHARS = 900000;
+let photoData = null;       // data URL shown in the form (new or existing)
+let photoChanged = false;   // the capturista picked or removed a photo
+let editingFotoId = null;   // fotoId of the record being edited
+let photoLoadSeq = 0;       // ignores stale async loads
+const fotoCache = new Map();
+
+function loadImage(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('No se pudo leer la imagen. Usa una foto JPG o PNG.')); };
+    img.src = url;
+  });
+}
+
+async function compressPhoto(file) {
+  const img = await loadImage(file);
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  let side = FOTO_MAX_SIDE;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const scale = Math.min(1, side / Math.max(img.naturalWidth, img.naturalHeight));
+    canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+    ctx.fillStyle = '#fff'; // transparent PNGs would turn black as JPEG
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    for (const q of [0.72, 0.6, 0.45]) {
+      const url = canvas.toDataURL('image/jpeg', q);
+      if (url.length <= FOTO_MAX_CHARS) return url;
+    }
+    side = Math.round(side * 0.75);
+  }
+  throw new Error('La foto es demasiado grande.');
+}
+
+async function getFoto(id) {
+  if (fotoCache.has(id)) return fotoCache.get(id);
+  const snap = await db.doc('fotos/' + id).get();
+  const exists = typeof snap.exists === 'function' ? snap.exists() : snap.exists;
+  const foto = exists ? ((snap.data() || {}).foto || null) : null;
+  if (foto) fotoCache.set(id, foto);
+  return foto;
+}
+
+async function deleteFoto(id) {
+  if (!id || !db) return;
+  try { await db.doc('fotos/' + id).delete(); fotoCache.delete(id); } catch (e) { console.error(e); }
+}
+
+function showPhotoPreview(src, loading) {
+  const box = document.getElementById('photoPreviewBox');
+  const img = document.getElementById('photoPreview');
+  box.hidden = !src && !loading;
+  img.hidden = !src;
+  if (src) img.src = src; else img.removeAttribute('src');
+  document.getElementById('photoLoading').hidden = !loading;
+  document.getElementById('photoRemove').hidden = !src && !loading;
+  document.getElementById('photoPickText').textContent = (src || loading) ? 'Cambiar foto' : 'Tomar o elegir foto';
+}
+
+function clearPhoto() {
+  photoLoadSeq++;
+  photoData = null;
+  photoChanged = false;
+  editingFotoId = null;
+  document.getElementById('fotoInput').value = '';
+  showPhotoPreview(null, false);
+}
+
+document.getElementById('photoPick').addEventListener('click', () => document.getElementById('fotoInput').click());
+document.getElementById('fotoInput').addEventListener('change', async (e) => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  const seq = ++photoLoadSeq;
+  showPhotoPreview(photoData, true);
+  try {
+    const data = await compressPhoto(file);
+    if (seq !== photoLoadSeq) return;
+    photoData = data;
+    photoChanged = true;
+    showPhotoPreview(photoData, false);
+  } catch (err) {
+    if (seq !== photoLoadSeq) return;
+    showPhotoPreview(photoData, false);
+    toast(err.message || 'No se pudo procesar la foto.', 'error');
+  }
+});
+document.getElementById('photoRemove').addEventListener('click', () => {
+  photoLoadSeq++;
+  photoData = null;
+  photoChanged = true;
+  showPhotoPreview(null, false);
+});
+
+async function viewPhoto(entry) {
+  const overlay = document.getElementById('photoModal');
+  const img = document.getElementById('photoModalImg');
+  const status = document.getElementById('photoModalStatus');
+  document.getElementById('photoModalTitle').textContent = `Evidencia · ${entry.veladora || ''} · ${entry.fecha || ''}`;
+  img.hidden = true; img.removeAttribute('src');
+  status.textContent = 'Cargando foto…';
+  openModal(overlay);
+  try {
+    const foto = await getFoto(entry.fotoId);
+    if (overlay.hidden) return;
+    if (foto) { img.src = foto; img.hidden = false; status.textContent = ''; }
+    else status.textContent = 'La foto ya no está disponible.';
+  } catch (err) {
+    status.textContent = 'No se pudo cargar la foto.';
+    console.error(err);
+  }
+}
+document.getElementById('photoModalClose').addEventListener('click', () => closeModal(document.getElementById('photoModal')));
+document.getElementById('photoModal').addEventListener('click', (e) => {
+  if (e.target.id === 'photoModal') closeModal(e.target);
+});
+
 function resetForm() {
+  clearPhoto();
   document.getElementById('entryForm').reset();
   document.getElementById('fecha').value = todayLocal();
   fillSelect(document.getElementById('mezcla1'), MEZCLAS, "PAMECH (M. CHINA)");
@@ -234,9 +362,18 @@ document.getElementById('entryForm').addEventListener('submit', async (e) => {
     updatedAt: new Date().toISOString(),
   };
   const wasEditing = !!editingId;
+  const oldFotoId = editingFotoId;
   const btn = document.getElementById('submitBtn');
   btn.disabled = true;
+  let newFotoId = null;
   try {
+    if (photoChanged && photoData) {
+      const ref = await db.collection('fotos').add({ foto: photoData, createdAt: data.updatedAt });
+      if (!ref || !ref.id) throw new Error('no se pudo guardar la foto');
+      newFotoId = ref.id;
+      fotoCache.set(newFotoId, photoData);
+    }
+    data.fotoId = photoChanged ? (newFotoId || '') : (oldFotoId || '');
     if (editingId) {
       await db.doc('capturas/' + editingId).update(data);
     } else {
@@ -244,10 +381,13 @@ document.getElementById('entryForm').addEventListener('submit', async (e) => {
       data.capturadoPorId = myId || null;
       await db.collection('capturas').add(data);
     }
+    // The capture now points at the new photo (or none): drop the old one.
+    if (photoChanged && oldFotoId) deleteFoto(oldFotoId);
     resetForm();
     toast(wasEditing ? 'Captura actualizada.' : 'Captura guardada.');
     document.querySelector('.tab[data-screen="history"]').click();
   } catch (err) {
+    if (newFotoId) deleteFoto(newFotoId); // don't leave an orphan photo behind
     toast('No se pudo guardar: ' + (err && err.message ? err.message : 'error desconocido'), 'error');
   } finally {
     btn.disabled = false;
@@ -268,6 +408,12 @@ function validateCapture(pesoProm1, pesoProm2) {
     if (num('pesoTotal2') <= 0) return 'Mezcla 2: captura el peso total.';
     if (pesoProm2 < 0) return 'Mezcla 2: el peso promedio sale negativo. Revisa los pesos totales y el vaso.';
   }
+  // Evidence photo is required. Only records saved before the photo existed
+  // can still be edited without one (that weighing can't be photographed now).
+  if (!document.getElementById('photoLoading').hidden) return 'Espera a que termine de cargar la foto.';
+  const photoRequired = !editingId || !!editingFotoId;
+  const hasPhoto = photoChanged ? !!photoData : (!!editingFotoId || !!photoData);
+  if (photoRequired && !hasPhoto) return 'Agrega la fotografía de evidencia del peso.';
   return null;
 }
 
@@ -288,6 +434,21 @@ function startEdit(entry) {
   document.getElementById('restarVaso1').checked = restaVaso1(entry);
   restarVasoTouched = true; // keep the record's choice while editing
   computePromedios();
+  clearPhoto();
+  editingFotoId = entry.fotoId || null;
+  if (editingFotoId) {
+    const seq = photoLoadSeq;
+    showPhotoPreview(null, true);
+    getFoto(editingFotoId).then(foto => {
+      if (seq !== photoLoadSeq) return;
+      photoData = foto;
+      showPhotoPreview(foto, false);
+    }).catch(() => {
+      if (seq !== photoLoadSeq) return;
+      showPhotoPreview(null, false);
+      toast('No se pudo cargar la foto de esta captura.', 'error');
+    });
+  }
   document.getElementById('formTitleText').textContent = 'Editar captura';
   document.getElementById('cancelEdit').hidden = false;
   document.getElementById('submitBtn').textContent = 'Guardar cambios';
@@ -299,7 +460,10 @@ async function deleteEntry(id) {
   const ok = await confirmDialog('¿Eliminar esta captura? Esta acción no se puede deshacer.');
   if (!ok) return;
   try {
+    const entry = entries.find(x => x.id === id);
     await db.doc('capturas/' + id).delete();
+    if (entry && entry.fotoId) deleteFoto(entry.fotoId);
+    if (editingId === id) resetForm();
     toast('Captura eliminada.');
   } catch (err) {
     toast('No se pudo eliminar: ' + (err && err.message ? err.message : 'error desconocido'), 'error');
@@ -365,17 +529,18 @@ async function exportExcel() {
     { key: 'pesoProm2', width: 14 },
     { key: 'observaciones', width: 30 },
     { key: 'restaVaso1', width: 14 },
+    { key: 'foto', width: 12 },
   ];
 
   // Row 1: title. Row 2: export summary.
-  ws.mergeCells('A1:P1');
+  ws.mergeCells('A1:Q1');
   ws.getCell('A1').value = 'CONTROL DE PESOS — GRUPO ARAMO';
   ws.getCell('A1').font = { bold: true, size: 14, color: { argb: HEADER_FG } };
   ws.getCell('A1').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: HEADER_BG } };
   ws.getCell('A1').alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
   ws.getRow(1).height = 26;
 
-  ws.mergeCells('A2:P2');
+  ws.mergeCells('A2:Q2');
   ws.getCell('A2').value = `Exportado ${new Date().toLocaleString('es-MX')} · ${list.length} captura${list.length === 1 ? '' : 's'}`;
   ws.getCell('A2').font = { italic: true, size: 9.5, color: { argb: 'FFB9884F' } };
   ws.getCell('A2').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: HEADER_BG } };
@@ -390,6 +555,7 @@ async function exportExcel() {
   ws.mergeCells('J3:N3'); ws.getCell('J3').value = 'MEZCLA 2';
   ws.mergeCells('O3:O4'); ws.getCell('O3').value = 'OBSERVACIONES';
   ws.mergeCells('P3:P4'); ws.getCell('P3').value = 'VASO RESTADO A MEZCLA 1';
+  ws.mergeCells('Q3:Q4'); ws.getCell('Q3').value = 'FOTO DE EVIDENCIA';
 
   const subHeaders = ['MEZCLA', 'CARTUCHO', 'PIEZAS MUESTREADAS', 'PESO TOTAL PZ (KG)', 'PESO PROM. (KG)'];
   ['E4', 'F4', 'G4', 'H4', 'I4'].forEach((c, i) => { ws.getCell(c).value = subHeaders[i]; });
@@ -420,6 +586,7 @@ async function exportExcel() {
       pesoProm2,
       observaciones: e.observaciones || '',
       restaVaso1: restaVaso1(e) ? 'SÍ' : 'NO',
+      foto: e.fotoId ? 'SÍ' : 'NO',
     });
     const r = row.number;
     ['D', 'H', 'M'].forEach(col => { ws.getCell(`${col}${r}`).numFmt = '0.000'; });
@@ -439,7 +606,7 @@ async function exportExcel() {
     ws.getCell(`O${r}`).alignment = { vertical: 'middle', wrapText: true };
   });
 
-  ws.autoFilter = { from: 'A4', to: `P${list.length + 4}` };
+  ws.autoFilter = { from: 'A4', to: `Q${list.length + 4}` };
 
   const buffer = await wb.xlsx.writeBuffer();
   const filename = `control-pesos-${todayLocal()}.xlsx`;
@@ -536,6 +703,7 @@ async function render() {
           <div class="card-name">${esc(e.veladora)}</div>
         </div>
         <div class="card-actions">
+          ${e.fotoId ? `<button class="photo" data-id="${esc(e.id)}" title="Ver foto de evidencia" aria-label="Ver foto de evidencia"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg></button>` : ''}
           <button class="edit" data-id="${esc(e.id)}" title="Editar" aria-label="Editar captura"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
           <button class="del" data-id="${esc(e.id)}" title="Eliminar" aria-label="Eliminar captura"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button>
         </div>
@@ -559,6 +727,10 @@ async function render() {
   cardList.querySelectorAll('.edit').forEach(b => b.addEventListener('click', () => {
     const entry = entries.find(x => x.id === b.dataset.id);
     if (entry) startEdit(entry);
+  }));
+  cardList.querySelectorAll('.photo').forEach(b => b.addEventListener('click', () => {
+    const entry = entries.find(x => x.id === b.dataset.id);
+    if (entry) viewPhoto(entry);
   }));
   cardList.querySelectorAll('.del').forEach(b => b.addEventListener('click', () => deleteEntry(b.dataset.id)));
 
