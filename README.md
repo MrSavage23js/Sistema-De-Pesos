@@ -95,7 +95,8 @@ galería; en la computadora, el selector de archivos.
   también su foto.
 - La foto es obligatoria para guardar. Solo las capturas hechas antes de esta
   función se pueden editar sin foto.
-- El Excel incluye la columna **FOTO DE EVIDENCIA** (SÍ / NO).
+- El Excel incluye la columna **FOTO DE EVIDENCIA** con la foto de cada
+  captura (reducida a 640 px para que el archivo no pese demasiado).
 
 **Importante:** después de actualizar el código, vuelve a pegar el contenido de
 `firestore.rules` en **Firestore Database > Reglas** y publícalo; sin eso,

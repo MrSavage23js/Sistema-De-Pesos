@@ -498,6 +498,42 @@ const STRIPE_BG = 'FFF3F1E9';
 const LINE = 'FFD3D7C9';
 const WARN = 'FFB23A3A';
 
+// Smaller JPEG for the Excel: still readable when enlarged, but keeps the
+// file light when exporting many captures.
+const EXCEL_FOTO_SIDE = 640;
+const EXCEL_FOTO_HEIGHT_PX = 150;
+async function excelThumb(dataUrl) {
+  const img = new Image();
+  img.src = dataUrl;
+  await img.decode();
+  const scale = Math.min(1, EXCEL_FOTO_SIDE / Math.max(img.naturalWidth, img.naturalHeight));
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(img.naturalWidth * scale));
+  c.height = Math.max(1, Math.round(img.naturalHeight * scale));
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.drawImage(img, 0, 0, c.width, c.height);
+  return { base64: c.toDataURL('image/jpeg', 0.75), w: c.width, h: c.height };
+}
+
+// Downloads the photos of the exported captures, a few at a time.
+async function loadExportFotos(list) {
+  const out = new Map();
+  const queue = list.filter(e => e.fotoId);
+  async function worker() {
+    while (queue.length) {
+      const e = queue.shift();
+      try {
+        const foto = await getFoto(e.fotoId);
+        if (foto) out.set(e.id, await excelThumb(foto));
+      } catch (err) { console.error(err); }
+    }
+  }
+  await Promise.all(Array.from({ length: 6 }, worker));
+  return out;
+}
+
 function styleHeaderCell(cell) {
   cell.font = { bold: true, color: { argb: HEADER_FG }, size: 10.5 };
   cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: HEADER_BG } };
@@ -517,6 +553,10 @@ async function exportExcel() {
     toast('No se pudo cargar el generador de Excel. Revisa tu conexión.', 'error');
     return;
   }
+
+  const conFoto = list.filter(e => e.fotoId).length;
+  if (conFoto) toast(`Preparando ${conFoto} foto${conFoto === 1 ? '' : 's'} para el Excel…`);
+  const fotos = await loadExportFotos(list);
 
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Grupo Aramo';
@@ -540,7 +580,7 @@ async function exportExcel() {
     { key: 'pesoProm2', width: 14 },
     { key: 'observaciones', width: 30 },
     { key: 'restaVaso1', width: 14 },
-    { key: 'foto', width: 12 },
+    { key: 'foto', width: 32 },
   ];
 
   // Row 1: title. Row 2: export summary.
@@ -597,7 +637,7 @@ async function exportExcel() {
       pesoProm2,
       observaciones: e.observaciones || '',
       restaVaso1: restaVaso1(e) ? 'SÍ' : 'NO',
-      foto: e.fotoId ? 'SÍ' : 'NO',
+      foto: fotos.has(e.id) ? '' : (e.fotoId ? 'NO DISPONIBLE' : 'SIN FOTO'),
     });
     const r = row.number;
     ['D', 'H', 'M'].forEach(col => { ws.getCell(`${col}${r}`).numFmt = '0.000'; });
@@ -615,6 +655,17 @@ async function exportExcel() {
       }
     });
     ws.getCell(`O${r}`).alignment = { vertical: 'middle', wrapText: true };
+    ws.getCell(`Q${r}`).alignment = { vertical: 'middle', horizontal: 'center' };
+
+    const foto = fotos.get(e.id);
+    if (foto) {
+      // Row height is in points (1 pt = 4/3 px); leave a small margin.
+      row.height = (EXCEL_FOTO_HEIGHT_PX + 10) * 0.75;
+      const height = EXCEL_FOTO_HEIGHT_PX;
+      const width = Math.min(220, Math.round(height * foto.w / foto.h));
+      const imageId = wb.addImage({ base64: foto.base64, extension: 'jpeg' });
+      ws.addImage(imageId, { tl: { col: 16.05, row: r - 1 + 0.04 }, ext: { width, height }, editAs: 'oneCell' });
+    }
   });
 
   ws.autoFilter = { from: 'A4', to: `Q${list.length + 4}` };
