@@ -253,7 +253,7 @@ function showPhotoPreview(src, loading) {
   if (src) img.src = src; else img.removeAttribute('src');
   document.getElementById('photoLoading').hidden = !loading;
   document.getElementById('photoRemove').hidden = !src && !loading;
-  document.getElementById('photoPickText').textContent = (src || loading) ? 'Cambiar foto' : 'Tomar o elegir foto';
+  document.getElementById('photoCameraText').textContent = (src || loading) ? 'Tomar otra' : 'Tomar foto';
 }
 
 function clearPhoto() {
@@ -262,11 +262,15 @@ function clearPhoto() {
   photoChanged = false;
   editingFotoId = null;
   document.getElementById('fotoInput').value = '';
+  document.getElementById('fotoCamera').value = '';
   showPhotoPreview(null, false);
 }
 
+// Two inputs: "capture" makes phones open the camera directly (Android's
+// newer photo picker hides the camera otherwise); the other one opens the gallery.
+document.getElementById('photoCamera').addEventListener('click', () => document.getElementById('fotoCamera').click());
 document.getElementById('photoPick').addEventListener('click', () => document.getElementById('fotoInput').click());
-document.getElementById('fotoInput').addEventListener('change', async (e) => {
+async function onPhotoSelected(e) {
   const file = e.target.files && e.target.files[0];
   e.target.value = '';
   if (!file) return;
@@ -283,7 +287,9 @@ document.getElementById('fotoInput').addEventListener('change', async (e) => {
     showPhotoPreview(photoData, false);
     toast(err.message || 'No se pudo procesar la foto.', 'error');
   }
-});
+}
+document.getElementById('fotoInput').addEventListener('change', onPhotoSelected);
+document.getElementById('fotoCamera').addEventListener('change', onPhotoSelected);
 document.getElementById('photoRemove').addEventListener('click', () => {
   photoLoadSeq++;
   photoData = null;
@@ -388,7 +394,12 @@ document.getElementById('entryForm').addEventListener('submit', async (e) => {
     document.querySelector('.tab[data-screen="history"]').click();
   } catch (err) {
     if (newFotoId) deleteFoto(newFotoId); // don't leave an orphan photo behind
-    toast('No se pudo guardar: ' + (err && err.message ? err.message : 'error desconocido'), 'error');
+    console.error(err);
+    if (err && err.code === 'permission-denied') {
+      toast('No se pudo guardar: Firebase rechazó el registro. Falta publicar las reglas nuevas (firestore.rules) en la consola de Firebase.', 'error');
+    } else {
+      toast('No se pudo guardar: ' + (err && err.message ? err.message : 'error desconocido'), 'error');
+    }
   } finally {
     btn.disabled = false;
   }

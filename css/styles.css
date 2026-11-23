@@ -471,6 +471,7 @@ textarea { resize: vertical; min-height: 42px; font-size: 14px; }
 }
 .photo-btn svg { width: 18px; height: 18px; flex: none; }
 .photo-btn:active { transform: scale(.97); }
+.photo-btn.secondary { flex: 0 1 auto; border-style: solid; border-color: var(--line); background: var(--card); }
 .photo-remove { padding: 10px 14px; }
 .photo-hint { font-size: 11px; color: var(--muted); margin: 6px 2px 12px; }
 
